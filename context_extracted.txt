@@ -1,0 +1,503 @@
+gossip project
+The Iberian Gossip-Protocol Grid
+Instead of using an off-the-shelf message broker, build a peer-to-peer network from scratch
+using a custom gossip protocol.
+A Gossip Protocol is the exact opposite. There is no boss. There is no central server.
+The Concept: How Gossip Works
+Imagine a massive high school cafeteria. If you want everyone to know a secret, you don't
+grab a microphone and announce it to the whole room (that's the central server approach).
+Instead, you tell two friends. Then, those two friends each tell two of their friends. Within
+minutes, the entire school knows the secret, even though you only talked to two people.
+In software, a Gossip Protocol works the same way. You spin up hundreds of tiny,
+independent programs (nodes). If one node learns a new piece of information, it randomly
+connects to a neighbor, shares the data, and disconnects. They keep doing this rapidly until
+the entire network is synchronized.
+The Project: The Iberian Energy Grid
+Here is how you apply that concept to build something mind-blowing:
+Imagine solar panels in Andalusia and wind turbines in Galicia. Sometimes Andalusia has
+too much sun (excess energy), and Galicia needs it. Instead of sending all that data to a
+central database in Madrid to figure out what to do, you make the solar panels and wind
+turbines talk directly to each other.
+Why this proves you are a System Architect
+The Build: Map out a decentralized energy market simulator across the Iberian
+peninsula. Spin up lightweight nodes representing solar output in Andalusia and wind
+generation in Galicia. They must negotiate load balancing and power routing directly with
+each other without a central server, eventually reaching a globally consistent state.
+The Flex: You aren't just using infrastructure; you are writing the low-level networking,
+routing, and consensus logic that powers distributed systems.
+1. A solar node in Seville generates 50 extra megawatts.
+2. It "gossips" to a node in Valencia: "Hey, I have 50MW for sale."
+3. Valencia logs that information and gossips it to Barcelona and Zaragoza.
+4. Within milliseconds, the entire Iberian grid knows Seville has power, and whoever needs
+it can claim it directly.
+If you build this with Cursor, you aren't just writing REST APIs or plugging into an AWS
+database. You are handling raw, low-level computer science problems:
+Since the goal is to build an Iberian energy grid, we will design the architecture around
+geographic constraints, using your high-speed workflow to rapidly prototype the underlying
+Python networking logic while letting the IDE handle the structural boilerplate.
+Phase 1: The Foundation (Single Node Isolation)
+Before nodes can talk, we have to build a node.
+Phase 2: Node Discovery (The "Seed" Problem)
+If a new node boots up in Valencia, how does it know who to talk to? A completely
+decentralized system still needs an entry point.
+Phase 3: The Infection (State Reconciliation)
+This is the core computer science. When two nodes connect, they need to figure out what
+data the other is missing without sending their entire database.
+Network Partitions: What happens if the internet goes down between Portugal and
+Spain? Your system has to adapt.
+Eventual Consistency: How do you guarantee that every node eventually agrees on
+who bought the power?
+Scalability: This system can scale to millions of nodes infinitely, because there is no
+single server to crash.
+The Goal: Create a lightweight, independent process that maintains its own state (e.g., "I
+am a solar farm in Andalusia, and I have 50MW").
+The Tech: Pure Python using asyncio  and UDP sockets. UDP is crucial here—it’s
+connectionless, meaning we just fire packets into the network without waiting for
+handshakes, which is perfect for high-speed gossip.
+The Milestone: You can spin up three separate terminal windows, and each one
+represents a distinct node listening on a different local port.
+The Goal: Implement a "Seed Node" pattern.
+The Architecture: We designate one or two nodes (e.g., Madrid and Lisbon) as initial
+seeds. When the Valencia node boots, it pings Madrid just to get a list of active peers.
+Once Valencia gets that list, it drops the dependency on Madrid and starts gossiping
+directly with its new neighbors.
+The Milestone: A node connects, gets the peer list, and Madrid can immediately crash
+without taking down Valencia.
+The Goal: Implement Version Vectors and Hash comparisons.
+Phase 4: Chaos Engineering (The Flex)
+This is where you prove you are an architect. A system is only good if it survives disaster.
+To simulate physical distance (like Seville and Madrid), we run multiple Python processes on
+localhost ( 127.0.0.1 ), but we give each node a different port (e.g., 8001, 8002). To the
+computer, Port 8001 talking to Port 8002 is fundamentally the exact same networking logic
+as a server in Spain talking to a server in Japan.
+Here is the raw, boilerplate-free Python code to prove this works. We will use pure UDP
+sockets and a background thread.
+Drop this into Cursor and save it as node.py .
+Python
+The Architecture: Every piece of data gets a timestamp and a version number. When
+Seville gossips with Barcelona, they don't send data; they swap a tiny cryptographic
+hash representing their current state. If the hashes match, they disconnect instantly. If
+they don't match, they calculate the difference and only transmit the missing energy logs.
+The Milestone: You manually update the state in Node A, and within seconds, you
+watch the terminal logs cascade as Nodes B, C, and D automatically synchronize.
+The Goal: Introduce network partitions and Byzantine faults.
+The Architecture: We write a script that randomly kills nodes, drops UDP packets, and
+splits the network in half (e.g., severing communication between Spain and Portugal).
+The remaining nodes must continue gossiping and functioning within their isolated
+clusters. When the connection is restored, the two halves of the peninsula must
+automatically heal and sync their databases.
+The Milestone: The system survives extreme, intentional sabotage without data
+corruption.
+import socket
+import threading
+import json
+import sys
+import time
+class GossipNode:
+def __init__(self, name, port):
+self.name = name
+self.host = '127.0.0.1' # Local network
+self.port = port
+self.state = {} # The node's internal "database"
+# Create a raw UDP socket
+self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+self.sock.bind((self.host, self.port))
+def listen(self):
+"""Endless loop that listens for incoming UDP packets."""
+print(f"🟢 [{self.name}] Online and listening on port
+{self.port}...")
+while True:
+# 1024 is the buffer size (how many bytes we accept at once)
+data, addr = self.sock.recvfrom(1024) 
+message = json.loads(data.decode('utf-8'))
+print(f"\n⚡ [{self.name}] Received data from {addr}:
+{message}")
+self.state.update(message)
+print(f"💾 [{self.name}] New State: {self.state}\n")
+def send_message(self, target_port, payload):
+"""Fires a UDP packet to another port."""
+message = json.dumps(payload).encode('utf-8')
+self.sock.sendto(message, (self.host, target_port))
+print(f"📤 [{self.name}] Sent payload to port {target_port}")
+def start(self):
+# Run the listener in a background thread so it doesn't block our
+inputs
+listener = threading.Thread(target=self.listen, daemon=True)
+listener.start()
+# --- Execution Logic ---
+if __name__ == "__main__":
+# Grab the name and port from the terminal command
+if len(sys.argv) < 3:
+print("Usage: python node.py <NodeName> <Port>")
+sys.exit(1)
+node_name = sys.argv[1]
+node_port = int(sys.argv[2])
+node = GossipNode(node_name, node_port)
+node.start()
+# Give the user a tiny command line interface to test sending messages
+time.sleep(0.5)
+while True:
+target = input(f"[{node.name}] Enter target port to send data to (or
+press Ctrl+C to quit): ")
+if target.isdigit():
+# For now, we hardcode a fake energy update
+How to test your first distributed network:
+You will instantly see Madrid catch the UDP packet, decode the JSON payload, and update
+its internal database state.
+Once you verify that these two nodes can throw data at each other, we have to solve the
+"Gossip" part. Right now, Seville manually targets Madrid. In a true gossip network, nodes
+pick targets randomly on a timer.
+To help you get the "tech stuff," let's translate the three technical concepts from the Python
+code I gave you into plain English.
+1. Sockets ( socket.SOCK_DGRAM ) = The Mailbox
+In web development, you usually use APIs (HTTP). That’s like a certified letter—you send it,
+the server signs for it, and sends a receipt back. It’s safe, but it's slow. Because we are
+building a high-speed energy grid, we are using UDP Sockets. A UDP socket is just an open
+mailbox at the end of your driveway. You don't ask for permission; you just drive by and
+throw a postcard (data) into it. If the wind blows the postcard away, oh well. It's incredibly
+fast and perfect for rapid-fire gossip.
+2. Ports ( 8001 , 8002 ) = The Street Address
+Your computer is an apartment building. It has one main address (localhost, or 127.0.0.1 ).
+But how does a postcard know which apartment to go to? That’s the port. Port 8001 is the
+Seville apartment. Port 8002 is the Madrid apartment.
+3. Threading ( threading.Thread ) = The Background Worker
+If you are standing in your kitchen writing a new postcard, you cannot simultaneously be
+standing outside staring at the mailbox waiting for new mail. You only have one body.
+Computers are the same. If the program is waiting for you to type something in the terminal,
+it stops listening to the network. So, we use a "Thread." We hire a background worker whose
+only job is to stand at the mailbox (the socket) and yell if a postcard arrives, leaving you free
+to keep typing.
+We already established Phase 1: The Nodes (independent, isolated workers). Here is the
+rest of the blueprint.
+fake_payload = {"energy_surplus": "50MW", "origin": node.name}
+node.send_message(int(target), fake_payload)
+1. Open two separate terminal windows inside Cursor.
+2. In Terminal 1, boot up the Seville node on port 8001: python node.py Seville 8001
+3. In Terminal 2, boot up the Madrid node on port 8002: python node.py Madrid 8002
+4. Now, in the Seville terminal, it will ask for a target port. Type 8002  and hit enter.
+Phase 2: The Topology (How they find each other)
+Right now, our nodes are alone in the dark. If a new wind turbine boots up in Porto, it has no
+idea that Seville or Madrid even exist. We need a way for nodes to discover each other
+without relying on a central database.
+Phase 3: The Infection (How they share data)
+If every node constantly yelled all of its data at everyone else, the network would instantly
+crash from the traffic. We need them to sync their energy states, but they have to be
+incredibly efficient about it.
+Phase 4: Chaos and Healing (How it survives)
+This is the phase that proves you aren't just building a toy. Distributed systems are
+guaranteed to fail. Internet cables get cut. Servers melt. Your architecture has to survive it.
+The Architectural Pattern: "Seed Nodes" (Bootstrapping)
+The Design: We designate two highly stable locations—let's say Madrid and Lisbon—as
+"Seed Nodes." They are the anchors.
+How it works: 1. The new Porto node wakes up. The only thing it knows is the address
+of Lisbon. 2. Porto sends a tiny message to Lisbon: "Hey, I'm new. Who else is online?"
+3. Lisbon replies with a list of 5 random active nodes (e.g., Seville, Faro, Bilbao). 4. The
+Flex: Porto immediately disconnects from Lisbon and starts talking directly to its new
+friends. If Lisbon catches on fire and dies 10 seconds later, the grid doesn't care. Porto is
+already connected to the rest of the network.
+The Architectural Pattern: "Anti-Entropy" via Hashes.
+The Design: Nodes don't send data; they send "fingerprints" of their data.
+How it works:
+1. Seville generates 50MW. It updates its own database.
+2. Seville randomly connects to Valencia. Instead of sending its entire database, Seville
+sends a short cryptographic hash (a mathematical fingerprint) of its current state.
+3. Valencia compares Seville's fingerprint to its own.
+4. If the fingerprints match, they say "Cool, we have the same data," and disconnect
+instantly.
+5. If the fingerprints are different, they figure out exactly which tiny piece of data is
+missing and only transmit that specific update.
+The Architectural Pattern: Network Partitions and Eventual Consistency.
+The Design: We assume the network will physically split in half.
+How it works:
+1. Imagine a massive storm takes out the internet lines crossing the border between
+Spain and Portugal.
+To make this decision, you need to understand the trade-offs of the "Seed Node" problem.
+Remember, a Seed Node is just an introduction point. It’s the address hardcoded into a new
+node’s configuration file so it knows who to say "hello" to when it first turns on.
+Here is the logic you must balance:
+1. The Quantity Problem (How many?)
+2. The Geography Problem (Where?)
+This is where the architecture gets interesting. In distributed systems, we plan for "Network
+Partitions"—the physical internet cables breaking. If you pick 3 Seed Nodes, but put them all
+in Spain (e.g., Madrid, Barcelona, Valencia), you have a massive architectural flaw. If a storm
+cuts the major internet trunks crossing the border into Portugal, Spain and Portugal will split
+into two separate networks. If a new node boots up in Lisbon during that storm, it won't be
+able to reach the Spanish seeds. It will fail to join the Portuguese grid, even though the
+Portuguese grid is right next to it, because there is no Portuguese seed to introduce it.
+The Overkill Problem
+Remember, a seed node isn't a special, magical server. It's just a regular node whose IP
+address and port are hardcoded into a text file so new nodes know who to ping when they
+wake up.
+2. The Portuguese nodes (Lisbon, Porto, Faro) can't reach the Spanish nodes.
+3. Instead of crashing, the network smoothly splits into two smaller, independent grids.
+Portugal gossips with Portugal; Spain gossips with Spain.
+4. The Healing: When the internet is restored hours later, a node in Faro finally
+reaches a node in Seville. They swap their "fingerprints" (from Phase 3), realize they
+are vastly out of sync, and aggressively trade the missing data until the entire
+peninsula is unified again.
+Too Few (e.g., 1 Seed): If you only make Madrid the seed node, what happens if
+Madrid's server catches fire? The nodes that are already connected will keep gossiping
+just fine (remember, there's no central boss). But if a new solar panel in Seville boots up,
+it will try to ping Madrid, get no answer, and sit there in the dark forever. This is a Single
+Point of Failure (SPOF) for new connections.
+Too Many (e.g., All 20 nodes): If every node is a seed, every time a new turbine gets
+built, you have to update a massive configuration file. It defeats the purpose of being
+lightweight and decentralized.
+The Sweet Spot: Usually 3 to 5 highly stable, geographically separated nodes.
+If you have 5 seed nodes, every single time you deploy a new wind turbine node, you
+have to write 5 different addresses into its configuration file.
+You only need just enough seeds to guarantee that a new node can find an open door. Once
+the node steps through that door, it gets the addresses of everyone else automatically and
+the seeds become irrelevant.
+The Architect's Decision
+If we apply the industry standard "Rule of 3" to our Iberian grid, we need to pick 3 cities that
+geographically protect us from internet cables getting cut (network partitions).
+A battle-tested setup would look like this:
+If you lock in those three as your seeds, your network can survive almost any regional
+blackout.
+Moving to Phase 3: The Infection (Data Sync)
+Now that our nodes exist and know how to find each other, we have to solve the hardest
+computer science problem on the board: State Reconciliation.
+When Seville connects to Valencia, how do they figure out what data is missing without
+sending their entire database to each other?
+To code this, we need to decide what a single "record" in our database actually looks like.
+Every time a power plant generates energy, it creates a record.
+Here is exactly how Option B works in practice, using a concept called Anti-Entropy State
+Reconciliation.
+The Anatomy of Option B (The Payload)
+Instead of just sending raw energy numbers, every time a node generates power, it creates a
+structured record that includes a mathematical fingerprint (the hash).
+In your Python code, the actual database record for a node will look like this:
+JSON
+In real-world systems (like Apache Cassandra or blockchain networks), whether the
+network has 10 nodes or 10,000 nodes, engineers usually only use 3 to 5 seed nodes
+total.
+1. Madrid (The Core): Dead center of the peninsula. Highly connected.
+2. Lisbon (The Western Anchor): Guarantees that if the Spain/Portugal border connection
+drops, the Portuguese nodes still have a seed to connect to.
+3. Barcelona (The Eastern Anchor): Protects the Mediterranean coast if central routes
+fail.
+{
+"city": "Seville",
+The High-Speed Sync Logic
+When Seville connects to Valencia to gossip, it does not send that whole payload. It only
+sends the fingerprint.
+This is the exact code you can drop into your Obsidian vault under Phase 3: Anti-Entropy
+Sync.
+We are going to upgrade your original node script. We are adding hashlib  to generate the
+cryptographic fingerprints, and we are introducing a basic protocol so the nodes know how to
+talk to each other.
+Instead of just throwing data blindly, the nodes will now perform the "Hash Check -> Request
+Data -> Full Sync" dance we designed.
+Save this as advanced_node.py :
+Python
+"energy_surplus_mw": 50,
+"timestamp": 1713725000,
+"version": 4,
+"data_hash": "e4d909c290d0fb1ca068ffaddf22cbd0"
+}
+Version: A simple counter. Every time Seville's energy changes, the version goes up.
+Data Hash: We take the city, energy, timestamp, and version, and run it through a
+hashing algorithm (like MD5 or SHA-256). It spits out that random-looking string of
+characters. If even a single digit in the energy data changes, that entire hash changes
+completely.
+1. The Ping: Seville fires a tiny UDP packet to Valencia: "Hey, my current state for Seville is
+Version 4, Hash e4d909... "
+2. The Check: Valencia looks at its own database. It sees that its record for Seville is only
+Version 3.
+3. The Request: Valencia realizes it is out of date. It fires a packet back: "I am out of sync.
+Send me the full data for Version 4."
+4. The Sync: Seville sends the complete JSON payload. Valencia updates its database,
+and now both cities have identical data.
+import socket
+import threading
+import json
+import sys
+import time
+import hashlib
+def generate_hash(city, energy, timestamp, version):
+"""Creates a unique mathematical fingerprint of the data."""
+raw_string = f"{city}{energy}{timestamp}{version}"
+return hashlib.md5(raw_string.encode('utf-8')).hexdigest()
+class AdvancedGossipNode:
+def __init__(self, name, port):
+self.name = name
+self.host = '127.0.0.1'
+self.port = port
+# The internal database. 
+# Example: {"Seville": {"energy": 50, "version": 1, "hash":
+"abc..."}}
+self.db = {} 
+self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+self.sock.bind((self.host, self.port))
+def update_own_energy(self, new_energy_mw):
+"""Updates this node's own energy level and recalculates the
+hash."""
+current_data = self.db.get(self.name, {"version": 0})
+new_version = current_data.get("version", 0) + 1
+timestamp = int(time.time())
+new_hash = generate_hash(self.name, new_energy_mw, timestamp,
+new_version)
+self.db[self.name] = {
+"city": self.name,
+"energy_surplus_mw": new_energy_mw,
+"timestamp": timestamp,
+"version": new_version,
+"data_hash": new_hash
+}
+print(f"\n🔋 Updated internal state: Version {new_version} | Hash:
+{new_hash[:8]}...")
+def listen(self):
+"""Background thread listening for network traffic."""
+while True:
+data, addr = self.sock.recvfrom(2048)
+message = json.loads(data.decode('utf-8'))
+msg_type = message.get("type")
+# STEP 1: Someone is asking if our hashes match
+if msg_type == "HASH_CHECK":
+remote_city = message["city"]
+remote_hash = message["hash"]
+remote_version = message["version"]
+local_record = self.db.get(remote_city)
+if not local_record or local_record["version"] <
+remote_version:
+print(f"\n🔍 [SYNC] Hash mismatch for {remote_city}!
+They have version {remote_version}. Requesting full data...")
+self.send_udp(addr[1], {"type": "REQUEST_DATA", "city":
+remote_city})
+else:
+print(f"\n✅ [SYNC] Hash match for {remote_city}. We
+are up to date.")
+# STEP 2: Someone realized they are out of date and wants our
+full data
+elif msg_type == "REQUEST_DATA":
+requested_city = message["city"]
+if requested_city in self.db:
+print(f"\n📦 [SYNC] Sending full payload for
+{requested_city} to port {addr[1]}...")
+self.send_udp(addr[1], {
+"type": "FULL_SYNC", 
+"payload": self.db[requested_city]
+})
+# STEP 3: We received the full missing data. Save it!
+elif msg_type == "FULL_SYNC":
+payload = message["payload"]
+city = payload["city"]
+self.db[city] = payload
+print(f"\n💾 [SYNC] Downloaded new data for {city}:
+{payload['energy_surplus_mw']}MW. Database updated!")
+def send_udp(self, target_port, message):
+"""Helper function to fire a UDP packet."""
+data = json.dumps(message).encode('utf-8')
+self.sock.sendto(data, (self.host, target_port))
+def trigger_gossip(self, target_port, city_to_gossip):
+"""Starts the gossip process by sending just the fingerprint."""
+if city_to_gossip in self.db:
+record = self.db[city_to_gossip]
+packet = {
+"type": "HASH_CHECK",
+"city": city_to_gossip,
+"version": record["version"],
+"hash": record["data_hash"]
+}
+print(f"\n📤 Gossiping hash for {city_to_gossip} to port
+The Architecture in Action (How to test this)
+If you really want to prove to yourself that you understand this, run this exact sequence in
+your terminal:
+Now, you have two isolated nodes. They both default to 10MW of energy at Version 1.
+{target_port}...")
+self.send_udp(target_port, packet)
+else:
+print("I don't have any data for that city yet.")
+def start(self):
+print(f"🟢 [{self.name}] Online on port {self.port}")
+threading.Thread(target=self.listen, daemon=True).start()
+# --- Command Line Interface ---
+if __name__ == "__main__":
+if len(sys.argv) < 3:
+print("Usage: python advanced_node.py <CityName> <Port>")
+sys.exit(1)
+node = AdvancedGossipNode(sys.argv[1], int(sys.argv[2]))
+node.start()
+# Initialize with some default power
+node.update_own_energy(10)
+time.sleep(0.5)
+print("\nCOMMANDS:")
+print("1. Type a number to update your own energy (e.g., '50')")
+print("2. Type 'gossip <port>' to sync with another node (e.g., 'gossip
+8002')")
+while True:
+cmd = input(f"\n[{node.name}] > ").strip().split()
+if not cmd: continue
+if len(cmd) == 1 and cmd[0].isdigit():
+node.update_own_energy(int(cmd[0]))
+elif len(cmd) == 2 and cmd[0] == "gossip" and cmd[1].isdigit():
+# Gossip our own state to the target port
+node.trigger_gossip(int(cmd[1]), node.name)
+else:
+print("Invalid command.")
+1. Terminal 1: python advanced_node.py Seville 8001
+2. Terminal 2: python advanced_node.py Valencia 8002
+The Test:
+Watch the terminal logs explode. You will literally see the protocol happen in real-time:
+If you type gossip 8002  a second time, nothing happens except a tiny log saying "Hash
+match... We are up to date."  No bulky data is sent. The network stays totally quiet.
+Phase 4—Chaos Engineering and the "Split-Brain" Problem.
+In standard software, if the database goes down, the app is dead. In a distributed system,
+we assume the network will break, and we design the system to survive it. This is where you
+prove you aren't just a coder; you are an architect who builds systems that are "functionally
+immortal."
+The Concept: The Network Partition
+Imagine a storm cuts the undersea cables between Spain and Portugal.
+The Architectural Fix: Eventual Consistency
+We don't try to stop the split. Instead, we embrace it.
+Go to the Seville terminal and type 50  (Hit enter). You will see Seville update its internal
+state to Version 2 and generate a new hash.
+Still in the Seville terminal, type gossip 8002 .
+1. Seville sends a tiny HASH_CHECK .
+2. Valencia receives it, checks its own database, and realizes, "Wait, my Seville record is
+Version 1, but this guy has Version 2."
+3. Valencia fires back a REQUEST_DATA .
+4. Seville fires back the FULL_SYNC  payload.
+5. Valencia saves it.
+The Problem: The nodes in Lisbon can still talk to Porto, and the nodes in Madrid can
+still talk to Seville. But Spain can't talk to Portugal.
+The Danger: If both sides keep accepting energy updates, they will drift apart. Spain
+thinks the total grid capacity is X, and Portugal thinks it is Y. This is called The Split-
+Brain Problem.
+1. Isolation: While the network is cut, the "Portuguese cluster" and the "Spanish cluster"
+keep gossiping internally. They stay consistent within their own groups.
+2. Healing: The moment the cable is repaired, a node in Lisbon finally reaches a node in
+Madrid.
+3. The Reunion: They swap hashes (from Phase 3). They realize they are massively out of
+sync. Because our protocol uses Timestamps and Version Numbers, the nodes
+automatically figure out which data is the newest and update everyone.
+Within seconds, the entire peninsula is unified again without a single human having to restart
+a server.
+The "Architect's Flex": How to Test for Chaos
+To prove your system works, you have to try to kill it. Since we are running everything on one
+computer, we simulate "killing" the network by simply stopping a process or blocking a port.
+The Chaos Test Plan (Add this to your Obsidian):
+Moving to the "Cool" Part: The AI Supervisor (The Control Plane)
+Now that your Data Plane is bulletproof, we can finally talk about the AI.
+We are going to build a Supervisor Agent. This agent will not be inside the gossip loop; it
+will sit on top of it. It will act like a "Digital Twin" of the entire Iberian grid.
+The AI's Architecture:
+This is the ultimate project: A Decentralized, Self-Healing Energy Grid with an AI-Driven
+Strategic Supervisor.
+1. Spin up 4 nodes: Seville (8001), Madrid (8002), Lisbon (8003), Porto (8004).
+2. Sync them: Gossip between them until everyone has the same data.
+3. The Partition: Close the terminal windows for Madrid and Seville (the "Spanish" side).
+4. Local Update: In the Porto terminal, change the energy surplus to 999MW . Gossip it to
+Lisbon. Now, only the Portuguese side knows about the 999MW.
+5. The Restoration: Re-open Madrid and Seville.
+6. The Healing: Gossip from Lisbon (8003) to Madrid (8002).
+7. The Result: Watch as Madrid instantly "learns" about the 999MW update that happened
+while it was "dead."
+The Listener: The AI subscribes to the gossip feed. It sees every hash change and
+every energy update.
+The RAG Brain: It connects to your Obsidian vault (which contains the grid’s rules) and
+external weather APIs.
+The Output: It doesn't just show data; it makes predictions. "Seville is reporting 50MW
+surplus, but my weather RAG shows a cloud front moving in. I suggest Lisbon increases
+wind production by 20% to compensate."
